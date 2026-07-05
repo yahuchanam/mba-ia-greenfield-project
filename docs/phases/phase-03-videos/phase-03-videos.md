@@ -3,8 +3,8 @@ kind: phase
 name: phase-03-videos
 test_specs_aware: true
 sources_mtime:
-  docs/phases/phase-03-videos/context.md: "2026-07-04T21:25:22-0300"
-  docs/decisions/technical-decisions-phase-03-videos.md: "2026-07-04T21:00:40-0300"
+  docs/phases/phase-03-videos/context.md: "2026-07-04T22:26:36-0300"
+  docs/decisions/technical-decisions-phase-03-videos.md: "2026-07-04T22:22:23-0300"
   docs/decisions/technical-decisions-openapi-docs-nestjs.md: "2026-07-04T16:53:05-0300"
 ---
 

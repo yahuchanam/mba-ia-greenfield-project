@@ -44,6 +44,8 @@ _Subprojects in scope:_
 
 **Decision:** A (BullMQ + Redis)
 
+**Libraries:** @nestjs/bullmq, bullmq
+
 **Note:** Decision deliberately diverged from the Recommendation. The recommendation optimized for "fewest new containers"; the chosen path favors the standard NestJS/Full Cycle architecture and keeps the database out of the messaging role. Rationale:
 
 - **Ecosystem standard, purpose-built.** BullMQ is the de-facto NestJS background-job solution, highly optimized for queueing, and it offloads the work from PostgreSQL instead of adding to it.
@@ -111,6 +113,8 @@ _Subprojects in scope:_
 **Recommendation:** **Option A (`@aws-sdk/client-s3` v3)** — it is the same S3 API in dev (MinIO via `endpoint`+`forcePathStyle`) and prod (S3), directly satisfying the plan's "MinIO local, S3 in production" intent with zero code divergence, and it is the SDK whose presigned-multipart and presigned-GET primitives TD-02 and TD-07 depend on. Suggested layout: separate `videos` and `thumbnails` buckets, keys namespaced by the video's unique id.
 
 **Decision:** A (`@aws-sdk/client-s3` v3 + presigner)
+
+**Libraries:** @aws-sdk/client-s3, @aws-sdk/s3-request-presigner
 
 ---
 
@@ -199,6 +203,8 @@ _Subprojects in scope:_
 **Recommendation:** **Option A (`nanoid`)** — it directly satisfies "short and never-conflicting": a compact, URL-safe, non-enumerable id backed by a UNIQUE constraint (with a regenerate-on-conflict retry, mirroring the nickname pattern already in `channels`). UUID v4 works with zero deps but yields long, un-YouTube-like URLs; sequential ids leak information. The single small dependency is justified by the short, opaque URL the plan calls for.
 
 **Decision:** A (`nanoid` + UNIQUE constraint)
+
+**Libraries:** nanoid
 
 ---
 

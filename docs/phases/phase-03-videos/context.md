@@ -3,7 +3,8 @@ kind: phase
 name: phase-03-videos
 sources_mtime:
   docs/project-plan.md: "2026-07-04T15:52:46-0300"
-  docs/decisions/technical-decisions-phase-03-videos.md: "2026-07-04T21:00:40-0300"
+  docs/decisions/technical-decisions-phase-03-videos.md: "2026-07-04T22:22:23-0300"
+  docs/phases/phase-03-videos/library-refs.md: "2026-07-04T22:25:27-0300"
   docs/decisions/technical-decisions-openapi-docs-nestjs.md: "2026-07-04T16:53:05-0300"
   docs/phases/phase-01-configuracao-base/context.md: "2026-07-04T16:53:05-0300"
   docs/phases/phase-02-auth/context.md: "2026-07-04T16:53:05-0300"
@@ -51,12 +52,12 @@ sources_mtime:
 
 | Ref | Source | Scope | Topic | Status | Decision | Libraries |
 |-----|--------|-------|-------|--------|----------|-----------|
-| phase-03-videos/TD-01 | phase | Backend | Message Queue Technology | decided | A (BullMQ + Redis) | — |
+| phase-03-videos/TD-01 | phase | Backend | Message Queue Technology | decided | A (BullMQ + Redis) | `@nestjs/bullmq@^11.x`, `bullmq@^5.x` |
 | phase-03-videos/TD-02 | phase | Cross-layer | 10GB Upload Strategy (non-blocking) | decided | B (Presigned Multipart Upload) | — |
-| phase-03-videos/TD-03 | phase | Backend | Object Storage Client & Bucket/Key Organization | decided | A (`@aws-sdk/client-s3` v3 + presigner) | — |
+| phase-03-videos/TD-03 | phase | Backend | Object Storage Client & Bucket/Key Organization | decided | A (`@aws-sdk/client-s3` v3 + presigner) | `@aws-sdk/client-s3@^3.x`, `@aws-sdk/s3-request-presigner@^3.x` |
 | phase-03-videos/TD-04 | phase | Backend | Video Worker Runtime & Deployment | decided | A (separate container, shared codebase via Nest standalone context) | — |
 | phase-03-videos/TD-05 | phase | Backend | FFmpeg Integration for Metadata & Thumbnail | decided | B (direct `child_process` spawn of ffprobe/ffmpeg) | — |
-| phase-03-videos/TD-06 | phase | Backend | Unique Video URL Identifier | decided | A (`nanoid` + UNIQUE constraint) | — |
+| phase-03-videos/TD-06 | phase | Backend | Unique Video URL Identifier | decided | A (`nanoid` + UNIQUE constraint) | `nanoid@^3.3.x` (CommonJS line) |
 | phase-03-videos/TD-07 | phase | Cross-layer | Streaming & Download Delivery | decided | B (presigned `GetObject`) | — |
 | phase-03-videos/TD-08 | phase | Backend | Video Status Lifecycle & Processing-Failure Handling | decided | A (minimal `draft → processing → ready \| failed` + DLQ) | — |
 
@@ -83,7 +84,7 @@ _Source files:_
 ### phase-03-videos/TD-01
 
 **Recommendation:** the only genuinely open decision here is "which broker," and the project's guiding constraint is *reuse the existing stack*. pg-boss delivers durable jobs, retries, backoff, and native dead-letter on the PostgreSQL already running, avoiding a Redis or RabbitMQ container for a workload that is one job type at low volume. It also lets the draft-video INSERT and the job enqueue share a transaction (TD-08), closing the dual-write gap. BullMQ is the stronger choice only if Redis is wanted for other reasons (caching, rate-limit store) — not the case in this phase. _(Decision diverged to **A — BullMQ + Redis**; see the decisions doc's Note for rationale: ecosystem standard, DB is not a broker / Outbox Pattern, SPOF & table-bloat avoidance, forward alignment with Phases 05–06.)_
-**Libraries:** —
+**Libraries:** `@nestjs/bullmq@^11.x`, `bullmq@^5.x`
 
 ### phase-03-videos/TD-02
 
@@ -93,7 +94,7 @@ _Source files:_
 ### phase-03-videos/TD-03
 
 **Recommendation:** it is the same S3 API in dev (MinIO via `endpoint`+`forcePathStyle`) and prod (S3), directly satisfying the plan's "MinIO local, S3 in production" intent with zero code divergence, and it is the SDK whose presigned-multipart and presigned-GET primitives TD-02 and TD-07 depend on. Suggested layout: separate `videos` and `thumbnails` buckets, keys namespaced by the video's unique id.
-**Libraries:** —
+**Libraries:** `@aws-sdk/client-s3@^3.x`, `@aws-sdk/s3-request-presigner@^3.x`
 
 ### phase-03-videos/TD-04
 
@@ -108,7 +109,7 @@ _Source files:_
 ### phase-03-videos/TD-06
 
 **Recommendation:** it directly satisfies "short and never-conflicting": a compact, URL-safe, non-enumerable id backed by a UNIQUE constraint (with a regenerate-on-conflict retry, mirroring the nickname pattern already in `channels`). UUID v4 works with zero deps but yields long, un-YouTube-like URLs; sequential ids leak information. The single small dependency is justified by the short, opaque URL the plan calls for.
-**Libraries:** —
+**Libraries:** `nanoid@^3.3.x` (CommonJS line — see library-refs.md for the ESM pin rationale)
 
 ### phase-03-videos/TD-07
 

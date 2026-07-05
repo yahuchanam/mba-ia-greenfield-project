@@ -22,7 +22,7 @@ O fluxo de upload pré-cadastra o vídeo como rascunho e conduz um multipart upl
 
 **Covers AC:** #1
 **Source:** auto
-**Last sync:** 2026-07-05T01:10:16Z
+**Last sync:** 2026-07-05T01:30:00Z
 
 **Steps:**
   1. POST /videos autenticado como dono do canal com body `{ title, filename, contentType }` válido
@@ -34,7 +34,7 @@ O fluxo de upload pré-cadastra o vídeo como rascunho e conduz um multipart upl
 
 **Covers AC:** #2
 **Source:** auto
-**Last sync:** 2026-07-05T01:10:16Z
+**Last sync:** 2026-07-05T01:30:00Z
 
 **Steps:**
   1. POST /videos sem header `Authorization` com body válido
@@ -45,7 +45,7 @@ O fluxo de upload pré-cadastra o vídeo como rascunho e conduz um multipart upl
 
 **Covers AC:** #1
 **Source:** auto
-**Last sync:** 2026-07-05T01:10:16Z
+**Last sync:** 2026-07-05T01:30:00Z
 
 **Steps:**
   1. POST /videos autenticado com body faltando `title`
@@ -60,7 +60,7 @@ O fluxo de upload pré-cadastra o vídeo como rascunho e conduz um multipart upl
 
 **Covers AC:** #3
 **Source:** auto
-**Last sync:** 2026-07-05T01:10:16Z
+**Last sync:** 2026-07-05T01:30:00Z
 
 **Steps:**
   1. POST /videos/:publicId/complete no vídeo cujo upload já foi concluído/abortado, com body `{ parts }`
@@ -71,7 +71,7 @@ O fluxo de upload pré-cadastra o vídeo como rascunho e conduz um multipart upl
 
 **Covers AC:** #4
 **Source:** auto
-**Last sync:** 2026-07-05T01:10:16Z
+**Last sync:** 2026-07-05T01:30:00Z
 
 **Steps:**
   1. POST /videos/:publicId/parts autenticado como um usuário que NÃO é dono do canal do vídeo, com `{ partNumbers }`

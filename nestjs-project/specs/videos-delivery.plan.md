@@ -22,7 +22,7 @@ Os endpoints de entrega expõem metadados e autorizam a reprodução/baixa via U
 
 **Covers AC:** #1
 **Source:** auto
-**Last sync:** 2026-07-05T01:10:16Z
+**Last sync:** 2026-07-05T01:30:00Z
 
 **Steps:**
   1. GET /videos/:publicId/stream (anônimo) de um vídeo em `status = ready`
@@ -33,7 +33,7 @@ Os endpoints de entrega expõem metadados e autorizam a reprodução/baixa via U
 
 **Covers AC:** #2
 **Source:** auto
-**Last sync:** 2026-07-05T01:10:16Z
+**Last sync:** 2026-07-05T01:30:00Z
 
 **Steps:**
   1. GET /videos/:publicId/stream de um vídeo em `status = processing`
@@ -48,7 +48,7 @@ Os endpoints de entrega expõem metadados e autorizam a reprodução/baixa via U
 
 **Covers AC:** #3
 **Source:** auto
-**Last sync:** 2026-07-05T01:10:16Z
+**Last sync:** 2026-07-05T01:30:00Z
 
 **Steps:**
   1. GET /videos/:publicId/download sem header `Authorization` de um vídeo `ready`
@@ -63,7 +63,7 @@ Os endpoints de entrega expõem metadados e autorizam a reprodução/baixa via U
 
 **Covers AC:** #4
 **Source:** auto
-**Last sync:** 2026-07-05T01:10:16Z
+**Last sync:** 2026-07-05T01:30:00Z
 
 **Steps:**
   1. GET /videos/:publicId de um rascunho pertencente a outro canal (solicitante não-dono)
