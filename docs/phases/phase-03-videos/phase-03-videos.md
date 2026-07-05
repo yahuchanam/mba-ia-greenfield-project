@@ -128,7 +128,8 @@ Entregar o pipeline de vídeos do backend (`nestjs-project`): armazenamento de o
 
 **Description:** Expor o handshake de upload multipart via HTTP e montar o módulo de vídeos, restrito ao dono do canal.
 
-**Test Specs:** _pending /plan-test-specs_
+**Route:** POST /videos
+**Test Specs:** see `nestjs-project/specs/videos-upload.plan.md`
 
 **Technical actions:**
 
@@ -160,7 +161,8 @@ _E2E do fluxo de upload (init→parts→complete/abort, 401/403/404/409, wiring 
 
 **Description:** Entregar metadados, streaming e download via URLs presigned direto do storage, respeitando visibilidade (anônimo só vê `ready`) e exigindo autenticação no download.
 
-**Test Specs:** _pending /plan-test-specs_
+**Route:** GET /videos/:publicId
+**Test Specs:** see `nestjs-project/specs/videos-delivery.plan.md`
 
 **Technical actions:**
 
