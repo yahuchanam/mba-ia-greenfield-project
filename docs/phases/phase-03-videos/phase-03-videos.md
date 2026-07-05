@@ -18,7 +18,228 @@ Entregar o pipeline de vídeos do backend (`nestjs-project`): armazenamento de o
 
 ## Step Implementations
 
-<!-- SIs will be written in Phase B -->
+### SI-03.1 — Infra: MinIO + Redis no Compose + config
+
+**Description:** Subir a infraestrutura nova da fase (object storage + broker) no Docker Compose e expor sua configuração tipada, seguindo o padrão de config da Fase 01.
+
+**Technical actions:**
+
+1. Adicionar serviço `minio` ao `compose.yaml` + step de bootstrap (`mc mb`) criando os buckets `videos` e `thumbnails` (per `phase-03-videos/TD-03`).
+2. Adicionar serviço `redis` ao `compose.yaml` (per `phase-03-videos/TD-01`).
+3. Criar `src/config/storage.config.ts` e `src/config/queue.config.ts` via `registerAs` namespaced e estender o schema Joi em `src/config/env.validation.ts` (per `## Inherited Conventions` — phase 01); hosts usam os nomes de serviço Compose (`minio`, `redis`), nunca `localhost`.
+4. Atualizar `.env.example` com as chaves de storage (endpoint, credenciais, buckets) e de Redis, mantendo valores shell-safe (aspas quando necessário).
+
+**Tests:** _(empty — Infra)_
+
+**Dependencies:** none
+
+**Acceptance criteria:**
+
+- `docker compose up -d` sobe `minio` e `redis` com status `running`.
+- Os buckets `videos` e `thumbnails` existem no MinIO após o boot.
+- Boot da API falha (Joi) quando uma variável obrigatória de storage/redis está ausente.
+
+---
+
+### SI-03.2 — Entidade `Video` + migration
+
+**Description:** Modelar a tabela de vídeos ligada ao canal, com id público único e enum de status, e criar a migration correspondente.
+
+**Technical actions:**
+
+1. Criar `src/videos/entities/video.entity.ts` com os campos do `### Data Model → Video` (enum `status` com `draft`/`processing`/`ready`/`failed`, `public_id` único) (per `phase-03-videos/TD-06`, `phase-03-videos/TD-08`, `phase-03-videos/TD-03`).
+2. Definir a relação `Video` belongs to `Channel` (FK `channel_id`, on delete cascade).
+3. Criar a migration `CreateVideos` — tabela `videos`, tipo enum `videos_status_enum`, índices (`unique(public_id)`, `channel_id`, `status`) (per `## Inherited Conventions` — typeorm migrations); incluir `DROP TYPE IF EXISTS` do enum no `down`.
+
+**Tests:**
+
+| Artifact | Layer | Test file |
+|----------|-------|-----------|
+| `Video` | Integration: `unique(public_id)`, default `status = draft`, FK `channel_id`, valores do enum | `src/videos/entities/video.entity.integration-spec.ts` |
+| `CreateVideos` (migration) | Integration: aplica e reverte, cria/remove tabela + enum | `src/database/migrations.integration-spec.ts` (estender) |
+
+**Dependencies:** none _(a tabela `channels` é herdada da Fase 02)_
+
+**Acceptance criteria:**
+
+- Inserir dois vídeos com o mesmo `public_id` viola a constraint `unique`.
+- Um vídeo recém-criado sem `status` explícito persiste com `status = draft`.
+- Remover um canal remove em cascata seus vídeos.
+- A migration aplica e reverte deixando o schema limpo (sem enum órfão).
+
+---
+
+### SI-03.3 — Storage service (cliente S3 + presign)
+
+**Description:** Encapsular o acesso ao object storage num serviço reutilizável (API e worker), expondo as primitivas de multipart e de URL presigned.
+
+**Technical actions:**
+
+1. Criar `src/storage/storage.module.ts` + `src/storage/storage.service.ts` instanciando `S3Client` com `endpoint` + `forcePathStyle: true` a partir de `storage.config` (per `phase-03-videos/TD-03`).
+2. Implementar as primitivas de multipart: `createMultipartUpload`, `getUploadPartUrls` (presign de `UploadPart`), `completeMultipartUpload`, `abortMultipartUpload` (per `phase-03-videos/TD-02`).
+3. Implementar `getPresignedGetUrl(key, { attachment? })` para streaming e download (per `phase-03-videos/TD-07`), montando as chaves `videos/{public_id}/source.<ext>` e `thumbnails/{public_id}/thumb.jpg`.
+
+**Tests:**
+
+| Artifact | Layer | Test file |
+|----------|-------|-----------|
+| `StorageService` | Integration: contra o MinIO do Compose — multipart init/complete, presign PUT/GET com upload/download real | `src/storage/storage.service.integration-spec.ts` |
+| `StorageModule` | Unit: compilation | `src/storage/storage.module.spec.ts` |
+
+**Dependencies:** SI-03.1 _(precisa do MinIO e da storage.config)_
+
+**Acceptance criteria:**
+
+- Uma URL presigned de `UploadPart` aceita o PUT de uma parte direto no MinIO sem passar pela API.
+- `completeMultipartUpload` monta o objeto final e ele fica legível na chave `videos/{public_id}/source.<ext>`.
+- Uma URL presigned GET com `attachment` responde com `Content-Disposition: attachment`.
+
+---
+
+### SI-03.4 — VideosService + produtor BullMQ
+
+**Description:** Implementar a lógica de negócio dos vídeos: id público único, orquestração do upload (rascunho → completar/abortar) e enfileiramento do processamento.
+
+**Technical actions:**
+
+1. Criar `src/videos/videos.service.ts` com geração de `public_id` via `nanoid` + retry-on-conflict contra a constraint `unique` (espelhando o padrão de nickname de `channels`) (per `phase-03-videos/TD-06`).
+2. Implementar `createDraft(channel, dto)` — persiste `Video` em `status = draft` e inicia o multipart via `StorageService`, retornando `publicId` + `uploadId` (per `phase-03-videos/TD-08`, `phase-03-videos/TD-02`).
+3. Implementar `getPartUrls`, `completeUpload` (grava `source_key`, transiciona para `processing`, enfileira o job) e `abortUpload` (per `phase-03-videos/TD-02`, `phase-03-videos/TD-08`).
+4. Registrar `BullModule.forRoot` (conexão Redis via `queue.config`) + `registerQueue('process-video')` e o produtor `@InjectQueue('process-video')` com `attempts`/`backoff` (per `phase-03-videos/TD-01`).
+
+**Tests:**
+
+| Artifact | Layer | Test file |
+|----------|-------|-----------|
+| `VideosService` | Unit: geração de `public_id` + retry em colisão (mock repo), transições de status (mock storage/queue) | `src/videos/videos.service.spec.ts` |
+| `VideosService` | Integration: `createDraft`/`completeUpload` contra DB + MinIO reais, com job realmente enfileirado | `src/videos/videos.service.integration-spec.ts` |
+
+**Dependencies:** SI-03.2, SI-03.3
+
+**Acceptance criteria:**
+
+- `createDraft` persiste um vídeo em `status = draft` com `public_id` único de ~11 caracteres URL-safe.
+- Uma colisão de `public_id` é reprocessada com um novo id, sem erro para o chamador.
+- `completeUpload` deixa o vídeo em `status = processing` e um job `process-video` enfileirado com o `videoId`.
+
+---
+
+### SI-03.5 — Endpoints de upload (controller + module + DTOs)
+
+**Description:** Expor o handshake de upload multipart via HTTP e montar o módulo de vídeos, restrito ao dono do canal.
+
+**Test Specs:** _pending /plan-test-specs_
+
+**Technical actions:**
+
+1. Criar `src/videos/videos.module.ts` (`TypeOrmModule.forFeature([Video])` + `BullModule.registerQueue('process-video')` + `StorageModule`) e registrá-lo no `AppModule` (per `phase-03-videos/TD-01`).
+2. Criar `src/videos/videos.controller.ts` com `POST /videos`, `POST /videos/:publicId/parts`, `POST /videos/:publicId/complete`, `POST /videos/:publicId/abort` conforme `### API Contracts` (per `phase-03-videos/TD-02`, `phase-03-videos/TD-08`).
+3. Criar os DTOs (`CreateVideoDto`, `RequestPartsDto`, `CompleteUploadDto`) com `class-validator` + decoradores `@nestjs/swagger` (per `phase-02-auth/TD-06`, `openapi-docs-nestjs/TD-01`).
+4. Aplicar guard de autenticação + verificação de posse do canal, mapeando `403 FORBIDDEN_NOT_CHANNEL_OWNER` / `404 VIDEO_NOT_FOUND` conforme `### Authorization Matrix` e `### Error Catalog`.
+
+**Tests:**
+
+| Artifact | Layer | Test file |
+|----------|-------|-----------|
+| `VideosModule` | Unit: compilation | `src/videos/videos.module.spec.ts` |
+
+_E2E do fluxo de upload (init→parts→complete/abort, 401/403/404/409, wiring de `ValidationPipe`) são autorados por `/plan-test-specs`._
+
+**Dependencies:** SI-03.4
+
+**Acceptance criteria:**
+
+- `POST /videos` autenticado como dono retorna `201` com `{ publicId, status: "draft", uploadId }`.
+- `POST /videos` sem sessão retorna `401`.
+- `POST /videos/:publicId/complete` sobre um upload já finalizado retorna `409 UPLOAD_ALREADY_FINALIZED`.
+- `POST /videos/:publicId/parts` em vídeo de outro canal retorna `403 FORBIDDEN_NOT_CHANNEL_OWNER`.
+
+---
+
+### SI-03.6 — Endpoints de entrega (metadata + streaming + download)
+
+**Description:** Entregar metadados, streaming e download via URLs presigned direto do storage, respeitando visibilidade (anônimo só vê `ready`) e exigindo autenticação no download.
+
+**Test Specs:** _pending /plan-test-specs_
+
+**Technical actions:**
+
+1. Adicionar ao `VideosService`: `getPublicMetadata` (aplica visibilidade), `getStreamUrl` (presign GET, exige `status = ready`) e `getDownloadUrl` (presign GET com `attachment`) (per `phase-03-videos/TD-07`, `phase-03-videos/TD-08`).
+2. Adicionar ao `VideosController`: `GET /videos/:publicId`, `GET /videos/:publicId/stream`, `GET /videos/:publicId/download` conforme `### API Contracts`.
+3. Aplicar as regras de `### Authorization Matrix`: metadata/stream anônimos só para `ready` (senão `404 VIDEO_NOT_FOUND`); download exige autenticação (`401`); `409 VIDEO_NOT_READY` quando `status != ready`.
+4. Documentar os três endpoints com decoradores `@nestjs/swagger` (per `openapi-docs-nestjs/TD-01`).
+
+**Tests:**
+
+| Artifact | Layer | Test file |
+|----------|-------|-----------|
+| `VideosService` (delivery) | Integration: presign real, regra de `ready`, visibilidade por dono | `src/videos/videos.service.integration-spec.ts` (estender) |
+
+_E2E de streaming/download (200 com URL presigned, `404`/`409`/`401`, visibilidade) são autorados por `/plan-test-specs`._
+
+**Dependencies:** SI-03.5
+
+**Acceptance criteria:**
+
+- `GET /videos/:publicId/stream` de um vídeo `ready` retorna `200` com uma `url` presigned GET.
+- `GET /videos/:publicId/stream` de um vídeo `processing` retorna `409 VIDEO_NOT_READY`.
+- `GET /videos/:publicId/download` sem sessão retorna `401`.
+- `GET /videos/:publicId` de um rascunho de terceiro retorna `404 VIDEO_NOT_FOUND` (não vaza existência).
+
+---
+
+### SI-03.7 — Infra: container do worker + bootstrap standalone
+
+**Description:** Rodar o worker de vídeo como container separado da API, com FFmpeg instalado, bootando um contexto Nest standalone (sem servidor HTTP) que reaproveita entidades/serviços via DI.
+
+**Technical actions:**
+
+1. Criar `Dockerfile.worker` a partir da imagem base do projeto, instalando `ffmpeg`/`ffprobe` via apt (per `phase-03-videos/TD-04`, `phase-03-videos/TD-05`).
+2. Criar o entrypoint `src/worker/main.ts` via `NestFactory.createApplicationContext(WorkerModule)` — `WorkerModule` importa apenas os providers de fila, storage, config e TypeORM (sem controllers/HTTP) (per `phase-03-videos/TD-04`).
+3. Adicionar o serviço `video-worker` ao `compose.yaml` (build `Dockerfile.worker`, `depends_on` de `redis`/`minio`/`db`, mesmas variáveis de ambiente da API).
+
+**Tests:**
+
+| Artifact | Layer | Test file |
+|----------|-------|-----------|
+| `WorkerModule` | Unit: compilation (`createApplicationContext` resolve os providers de fila/storage/db) | `src/worker/worker.module.spec.ts` |
+
+**Dependencies:** SI-03.1, SI-03.4
+
+**Acceptance criteria:**
+
+- O container `video-worker` sobe e conecta na fila Redis sem expor porta HTTP.
+- O worker resolve `StorageService` e o repositório de `Video` via DI (mesmo codebase da API).
+- A imagem do worker tem `ffmpeg` e `ffprobe` disponíveis no PATH.
+
+---
+
+### SI-03.8 — Processamento FFmpeg + ciclo de status
+
+**Description:** Consumir o job `process-video`, extrair duração/metadados e thumbnail via FFmpeg, persistir os resultados e conduzir o ciclo de status até `ready` ou `failed`.
+
+**Technical actions:**
+
+1. Criar `src/worker/video-processing.service.ts` — `ffprobe -v quiet -print_format json -show_format -show_streams` via `child_process` spawn, com parse do JSON para `duration_seconds` + `metadata` (per `phase-03-videos/TD-05`).
+2. Extrair thumbnail (`ffmpeg -ss <t> -i <input> -frames:v 1 thumb.jpg`) e gravá-la em `thumbnails/{public_id}/thumb.jpg` via `StorageService` (per `phase-03-videos/TD-05`, `phase-03-videos/TD-03`).
+3. Criar o `@Processor('process-video')` consumer: baixa o source, chama o processamento, persiste `duration_seconds`/`metadata`/`thumbnail_key` e transiciona `processing → ready` (só após tudo durável) (per `phase-03-videos/TD-04`, `phase-03-videos/TD-08`).
+4. Implementar o tratamento de falha: com `attempts`/`backoff` esgotados, o job vai para dead-letter e o handler seta `status = failed` + `error_reason` (per `phase-03-videos/TD-01`, `phase-03-videos/TD-08`).
+
+**Tests:**
+
+| Artifact | Layer | Test file |
+|----------|-------|-----------|
+| `VideoProcessingService` | Unit: parse do JSON do ffprobe + construção de args (mock do boundary de spawn) | `src/worker/video-processing.service.spec.ts` |
+| `process-video` consumer | Integration: job real contra Redis + MinIO + FFmpeg — `draft→ready` no caminho feliz e `→failed` com `error_reason` no caminho de falha | `src/worker/video-processing.integration-spec.ts` |
+
+**Dependencies:** SI-03.7, SI-03.3, SI-03.4
+
+**Acceptance criteria:**
+
+- Após o processamento com sucesso, o vídeo fica `ready` com `duration_seconds`, `metadata` e `thumbnail_key` preenchidos.
+- A thumbnail existe na chave `thumbnails/{public_id}/thumb.jpg` e é servível por presign GET.
+- Um source inválido, esgotadas as tentativas, deixa o vídeo em `status = failed` com `error_reason` não nulo.
+- Nenhum vídeo alcança `ready` com metadados ou thumbnail ausentes (sem estado parcial).
 
 ---
 
@@ -242,14 +463,42 @@ Fila BullMQ sobre Redis (por `phase-03-videos/TD-01`). Um único tipo de job. Wo
 
 ---
 
-<!-- phase-a-complete -->
-
 ## Dependency Map
 
-<!-- Dep Map will be written in Phase B -->
+```
+SI-03.1 (root — infra: MinIO + Redis + config)
+├── SI-03.3 — depends on SI-03.1 (storage precisa do MinIO/config)
+│   └── SI-03.4 — depends on SI-03.2 + SI-03.3 (service usa entity + storage + fila)
+│       ├── SI-03.5 — depends on SI-03.4 (endpoints de upload)
+│       │   └── SI-03.6 — depends on SI-03.5 (endpoints de entrega)
+│       ├── SI-03.7 — depends on SI-03.1 + SI-03.4 (worker container + fila)
+│       │   └── SI-03.8 — depends on SI-03.7 + SI-03.3 + SI-03.4 (FFmpeg + ciclo de status)
+│       └── (SI-03.8 também depende de SI-03.3)
+└── (SI-03.7 também depende de SI-03.1)
+SI-03.2 (root — entidade Video + migration; channels herdado da Fase 02)
+```
 
 ---
 
 ## Deliverables
 
-<!-- Deliverables will be written in Phase B -->
+- [ ] SI-03.1 — Infra: MinIO + Redis no Compose + config
+- [ ] SI-03.2 — Entidade `Video` + migration
+- [ ] SI-03.3 — Storage service (cliente S3 + presign)
+- [ ] SI-03.4 — VideosService + produtor BullMQ
+- [ ] SI-03.5 — Endpoints de upload (controller + module + DTOs)
+- [ ] SI-03.6 — Endpoints de entrega (metadata + streaming + download)
+- [ ] SI-03.7 — Infra: container do worker + bootstrap standalone
+- [ ] SI-03.8 — Processamento FFmpeg + ciclo de status
+
+**Infra (Docker Compose):**
+
+- [ ] `docker compose up -d` sobe `nestjs-api`, `db`, `mailpit`, `minio`, `redis` e `video-worker` com status `running`.
+- [ ] Buckets `videos` e `thumbnails` criados automaticamente no MinIO.
+
+**Full test suites** _(comandos rodam dentro do container, per `nestjs-project/CLAUDE.md`)_:
+
+- [ ] Testes unit + integração passam (`docker compose exec nestjs-api npm test -- --runInBand`).
+- [ ] Testes E2E passam (`docker compose exec nestjs-api npm run test:e2e`).
+- [ ] Type-check passa (`docker compose exec nestjs-api npx tsc --noEmit` — exit 0).
+- [ ] Lint passa (`docker compose exec nestjs-api npm run lint`).
