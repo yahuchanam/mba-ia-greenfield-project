@@ -62,7 +62,10 @@ export class StorageService {
   }
 
   /** Starts a multipart upload and returns the S3 UploadId. */
-  async createMultipartUpload(key: string, contentType?: string): Promise<string> {
+  async createMultipartUpload(
+    key: string,
+    contentType?: string,
+  ): Promise<string> {
     const { UploadId } = await this.s3.send(
       new CreateMultipartUploadCommand({
         Bucket: this.videosBucket,

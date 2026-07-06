@@ -64,9 +64,10 @@ export class Video {
   @UpdateDateColumn({ type: 'timestamptz' })
   updated_at: Date;
 
-  // Inverse side (Channel.videos) is added in SI-03.5, once VideosModule
-  // registers Video via TypeOrmModule.forFeature — otherwise autoLoadEntities
-  // fails to resolve Video's metadata at app boot.
+  // Owning side only: no inverse `Channel.videos` — nothing consumes the reverse
+  // relation, and declaring it would force `Video` to be registered in every
+  // TypeORM context that loads `Channel` (partial test DataSources break otherwise).
+  // The FK + cascade delete are fully defined here.
   @ManyToOne(() => Channel, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'channel_id' })
   channel: Channel;
