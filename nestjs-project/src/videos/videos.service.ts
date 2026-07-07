@@ -22,6 +22,7 @@ import {
   NotChannelOwnerException,
   UploadAlreadyFinalizedException,
   VideoNotFoundException,
+  VideoNotReadyException,
 } from './videos.exceptions';
 
 const PG_UNIQUE_VIOLATION = '23505';
@@ -55,6 +56,15 @@ export interface CreateDraftInput {
   title: string;
   filename: string;
   contentType?: string;
+}
+
+export interface VideoMetadata {
+  publicId: string;
+  title: string;
+  status: VideoStatus;
+  durationSeconds: number | null;
+  thumbnailUrl: string | null;
+  channel: { nickname: string; name: string };
 }
 
 @Injectable()
@@ -171,6 +181,76 @@ export class VideosService {
 
     video.upload_id = null;
     await this.videos.save(video);
+  }
+
+  /**
+   * Public metadata, applying visibility: non-ready videos (draft/processing/
+   * failed) are only visible to their owner — third parties get 404 so the
+   * existence of an unpublished video is never leaked.
+   */
+  async getPublicMetadata(
+    publicId: string,
+    requesterChannelId?: string,
+  ): Promise<VideoMetadata> {
+    const video = await this.videos.findOne({
+      where: { public_id: publicId },
+      relations: ['channel'],
+    });
+    if (!video) {
+      throw new VideoNotFoundException();
+    }
+
+    const isOwner =
+      !!requesterChannelId && video.channel_id === requesterChannelId;
+    if (video.status !== VideoStatus.READY && !isOwner) {
+      throw new VideoNotFoundException();
+    }
+
+    const thumbnailUrl =
+      video.status === VideoStatus.READY && video.thumbnail_key
+        ? await this.storage.getPresignedGetUrl(video.thumbnail_key, {
+            bucket: this.storage.thumbnailsBucketName,
+          })
+        : null;
+
+    return {
+      publicId: video.public_id,
+      title: video.title,
+      status: video.status,
+      durationSeconds: video.duration_seconds,
+      thumbnailUrl,
+      channel: { nickname: video.channel.nickname, name: video.channel.name },
+    };
+  }
+
+  /** Presigned GET URL to stream a ready video directly from storage. */
+  async getStreamUrl(publicId: string): Promise<string> {
+    const video = await this.requireReady(publicId);
+    return this.storage.getPresignedGetUrl(video.source_key as string);
+  }
+
+  /** Presigned GET URL (attachment) to download a ready video. */
+  async getDownloadUrl(publicId: string): Promise<string> {
+    const video = await this.requireReady(publicId);
+    const ext = (video.source_key as string).split('.').pop() ?? 'mp4';
+    return this.storage.getPresignedGetUrl(video.source_key as string, {
+      attachment: true,
+      filename: `${video.public_id}.${ext}`,
+    });
+  }
+
+  /** Loads a video that must exist and be ready; else 404 / 409. */
+  private async requireReady(publicId: string): Promise<Video> {
+    const video = await this.videos.findOne({
+      where: { public_id: publicId },
+    });
+    if (!video) {
+      throw new VideoNotFoundException();
+    }
+    if (video.status !== VideoStatus.READY) {
+      throw new VideoNotReadyException();
+    }
+    return video;
   }
 
   /**

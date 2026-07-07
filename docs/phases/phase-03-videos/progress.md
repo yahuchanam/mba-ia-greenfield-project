@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 5/8 completed
+**SIs:** 6/8 completed
 
 ### SI-03.1 — Infra: MinIO + Redis no Compose + config
 - **Status:** completed
@@ -55,9 +55,14 @@
   - **Bug latente de infra pego na suíte completa:** `test:e2e` rodava `jest` SEM `--runInBand`, então as suítes E2E rodavam em paralelo compartilhando o mesmo DB. Meu suite (register→login, precisa do user persistir) corria com o `cleanAllTables` do `auth.e2e` → user truncado no meio → 401. As 3 suítes antigas conviviam porque só `auth.e2e` mexia em users. Corrigido adicionando `--runInBand` ao script `test:e2e` (alinha com a regra documentada do projeto). Isoladamente o suite já passava; só a suíte completa expôs a corrida.
 
 ### SI-03.6 — Endpoints de entrega (metadata + streaming + download)
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 12 (integração: 2 upload + 6 delivery com presign/fetch real contra MinIO; E2E delivery: 4)
+- **Observations:**
+  - Métodos no `VideosService`: `getPublicMetadata(publicId, requesterChannelId?)`, `getStreamUrl`, `getDownloadUrl`. Nova exceção `VideoNotReadyException` (409 VIDEO_NOT_READY).
+  - **Visibilidade:** só o `getPublicMetadata` aplica visibilidade por dono (não-ready de terceiro → 404, não vaza). `stream`/`download` são status-based: não-ready → 409 (per Error Catalog). Metadata carrega `channel` via `relations: ['channel']` (lado dono do ManyToOne).
+  - **Optional-auth descartado:** cheguei a criar um `OptionalJwtAuthGuard` para o dono ver o próprio rascunho via HTTP, mas isso forçava `VideosModule` a importar o `AuthModule` inteiro (JWT/mail/users config), inflando o teste de compilação do módulo. Como o plano só exige anônimo→404 no HTTP (ação 3) e a visibilidade-por-dono é capacidade de serviço (coberta pelo teste de integração), mantive `GET /videos/:publicId` como `@Public` anônimo. Guard removido (sem código morto).
+  - `metadata`/`stream` são `@Public`; `download` é protegido (guard global → 401 sem sessão). Movi `@ApiBearerAuth` do nível de classe para por-método (rotas `@Public` não podem anunciar bearer, per regra de controllers).
+  - `stream`/`download` presign a `source_key`; download com `attachment` + filename derivado da extensão.
 
 ### SI-03.7 — Infra: container do worker + bootstrap standalone
 - **Status:** pending
