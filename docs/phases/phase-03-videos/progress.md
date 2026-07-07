@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 4/8 completed
+**SIs:** 5/8 completed
 
 ### SI-03.1 — Infra: MinIO + Redis no Compose + config
 - **Status:** completed
@@ -43,10 +43,16 @@
   - Retry-on-collision do `public_id` sem transação (cada `save` é sua própria tx) — evita o problema de "transaction aborted" do SAVEPOINT; catch no unique-violation `23505`.
 
 ### SI-03.5 — Endpoints de upload (controller + module + DTOs)
-- **Status:** pending
-- **Tests:** —
+- **Status:** completed
+- **Tests:** 6 passing (1 module compilation + 5 E2E: 201/401/400/409/403)
 - **Observations:**
-  - `VideosModule` já foi criado na SI-03.4; aqui resta só adicionar `VideosController` + DTOs ao módulo existente e registrar o controller. (Sem relação inversa `Channel.videos` — decidido na SI-03.4.)
+  - `VideosModule` já existia (SI-03.4); aqui adicionei `VideosController` + 3 DTOs e importei `ChannelsModule`.
+  - **Guard:** nada de `@UseGuards` — o `JwtAuthGuard` é global (`APP_GUARD`), rotas protegidas por padrão; 401 sem sessão é automático. `@ApiBearerAuth('access-token')` no controller.
+  - **Resolução de canal:** adicionei `ChannelsService.findByUserId(userId)`; o controller resolve o canal do usuário autenticado (via `@CurrentUser().sub`) e passa `channel.id` ao `VideosService`. Helper privado `resolveChannelId` lança `NotChannelOwnerException` se (defensivamente) não houver canal — todo usuário registrado tem um (`createUserWithChannel` no register da Fase 02).
+  - **Status codes:** POST /videos → 201 (default); /parts e /complete → `@HttpCode(200)`; /abort → `@HttpCode(204)`.
+  - **E2E do cenário "complete em upload finalizado":** usei `abort` (204, não precisa de ETags reais) para finalizar o upload antes do `complete` → 409 `UPLOAD_ALREADY_FINALIZED`.
+  - OpenAPI: cada handler com `@ApiOperation` + `@ApiResponse` por status, erros via `getSchemaPath(ApiErrorEnvelope)` (envelope compartilhado).
+  - **Bug latente de infra pego na suíte completa:** `test:e2e` rodava `jest` SEM `--runInBand`, então as suítes E2E rodavam em paralelo compartilhando o mesmo DB. Meu suite (register→login, precisa do user persistir) corria com o `cleanAllTables` do `auth.e2e` → user truncado no meio → 401. As 3 suítes antigas conviviam porque só `auth.e2e` mexia em users. Corrigido adicionando `--runInBand` ao script `test:e2e` (alinha com a regra documentada do projeto). Isoladamente o suite já passava; só a suíte completa expôs a corrida.
 
 ### SI-03.6 — Endpoints de entrega (metadata + streaming + download)
 - **Status:** pending
