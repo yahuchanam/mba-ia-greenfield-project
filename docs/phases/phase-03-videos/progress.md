@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 6/8 completed
+**SIs:** 7/8 completed
 
 ### SI-03.1 — Infra: MinIO + Redis no Compose + config
 - **Status:** completed
@@ -65,9 +65,15 @@
   - `stream`/`download` presign a `source_key`; download com `attachment` + filename derivado da extensão.
 
 ### SI-03.7 — Infra: container do worker + bootstrap standalone
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 1 passing (compilação do `WorkerModule` contra Postgres+Redis reais, sem HTTP)
+- **Observations:**
+  - `WorkerModule` é autossuficiente: própria `ConfigModule.forRoot` (mesmo load array + `envValidationSchema` da API) + `TypeOrmModule.forRootAsync` + `BullModule.forRootAsync`/`registerQueue`. O standalone context não herda o graph do `AppModule`, então tudo é re-declarado.
+  - Boot via `NestFactory.createApplicationContext(WorkerModule)` em `src/worker/main.ts` (sem servidor HTTP); `enableShutdownHooks` para drain/close limpo. A conexão BullMQ segura o event loop, mantendo o processo vivo mesmo antes de existir `@Processor` (que entra na SI-03.8).
+  - **Bug pego pelo teste:** `forFeature([Video])` sozinho fazia o TypeORM entrar em loop de retry de conexão (~30s até falhar) com `Entity metadata for Video#channel was not found` — o worker não importa `AuthModule`/`ChannelsModule`/`UsersModule`, então o fecho de metadata da relação `Video → Channel ⟷ User` não existia. Fix: `forFeature([Video, Channel, User])` (Channel/User só para fechar o metadata; o worker não usa os repositórios deles). Esse hang era a causa do jest não emitir resultado antes do timeout.
+  - `Dockerfile.worker` = base `node:25.6.0-slim` + `apt install ffmpeg` (traz `ffmpeg` e `ffprobe`, ambos em `/usr/bin`); só a imagem do worker carrega os binários (API fica lean, per TD-04/TD-05). Serviço `video-worker` no `compose.yaml` (mesmo volume/env da API, `depends_on` db/minio/redis, **sem porta exposta**). Idle via `tail` como o `nestjs-api`; boot manual via `npm run start:worker:dev`.
+  - Scripts npm adicionados: `start:worker` / `start:worker:dev` / `start:worker:prod` (`nest start --entryFile worker/main`).
+  - Validação de infra fora do teste: imagem buildou, `which ffmpeg/ffprobe` OK, container `video-worker` sobe (`Up`, PORTS vazio).
 
 ### SI-03.8 — Processamento FFmpeg + ciclo de status
 - **Status:** pending
