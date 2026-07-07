@@ -1,0 +1,12 @@
+FROM node:25.6.0-slim
+
+# ffmpeg brings both `ffmpeg` and `ffprobe` — the worker drives them via
+# child_process spawn (TD-05). Only the worker image carries these binaries;
+# the API image stays lean (TD-04).
+RUN apt update && apt install -y procps curl ffmpeg
+
+WORKDIR /home/node/app
+
+USER node
+
+CMD [ "tail", "-f", "/dev/null" ]
