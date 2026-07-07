@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
-**Status:** in_progress
-**SIs:** 7/8 completed
+**Status:** completed
+**SIs:** 8/8 completed
 
 ### SI-03.1 — Infra: MinIO + Redis no Compose + config
 - **Status:** completed
@@ -76,6 +76,13 @@
   - Validação de infra fora do teste: imagem buildou, `which ffmpeg/ffprobe` OK, container `video-worker` sobe (`Up`, PORTS vazio).
 
 ### SI-03.8 — Processamento FFmpeg + ciclo de status
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 10 unit (`video-processing.service.spec.ts` — args + parse ffprobe + boundary de spawn mockado) + 2 integração (`video-processing.integration-spec.ts` — job real contra Redis+MinIO+FFmpeg+Postgres: `processing→ready` com duração/metadata/thumbnail e `→failed` com `error_reason`)
+- **Observations:**
+  - `VideoProcessingService` dirige ffprobe/ffmpeg via `child_process.spawn` direto (TD-05, Opção B — zero deps). Seams puros expostos para unit test: `buildFfprobeArgs`, `buildThumbnailArgs`, `parseProbe`; o método privado `run(cmd, args)` é o único boundary de spawn (mockado via `jest.mock('node:child_process')`).
+  - **Source baixado para arquivo temporário** (`mkdtemp` + `pipeline(Body, createWriteStream)`), não bufferizado em memória — vídeos podem ter até 10GB (TD-02). `workDir` sempre limpo no `finally`.
+  - Dois métodos novos no `StorageService` (a "parte get/put direta" deferida na SI-03.3): `downloadToFile(key, dest)` (GET do bucket `videos` → arquivo) e `putThumbnail(key, buffer)` (PUT no bucket `thumbnails`, `ContentType: image/jpeg`). Bucket routing fica dentro do StorageService (single responsibility), consistente com o resto da classe.
+  - **Ciclo de status (TD-08):** `ready` só é escrito via load-mutate-`save` depois que thumbnail está no storage e metadata persistida — nunca há estado parcial `ready`. Usei `save` (não `update`) no ready porque o `QueryDeepPartialEntity` do TypeORM rejeita o objeto jsonb `metadata` no `.update()`; `save` é também o padrão do `VideosService`.
+  - **`@Processor('process-video')` (`VideoProcessor extends WorkerHost`)** registrado como provider no `WorkerModule`. Tratamento de falha via `@OnWorkerEvent('failed')` com guarda `job.attemptsMade >= job.opts.attempts` — `failed` + `error_reason` escritos **uma única vez**, só quando as tentativas se esgotam (dead-letter); enquanto há retries, o vídeo fica em `processing`.
+  - **FFmpeg só existe na imagem do worker (TD-05):** o integration-spec é auto-gated por `spawnSync('ffprobe'/'ffmpeg', ['-version']).status === 0` → `describe.skip` no container `nestjs-api` (lean, sem ffmpeg) e roda de verdade no container `video-worker`. Por isso a validação completa roda a suíte unit+integração no `nestjs-api` (o spec do worker aparece como `skipped`) **e** o integration-spec do worker no `video-worker` (2/2 passando contra ffmpeg+redis+minio+pg reais).
+  - **DoD:** unit+integração no `nestjs-api` = 31 suites / 177 pass / 2 skipped (o worker integration, gated); integração do worker no `video-worker` = 2/2 pass; e2e = 61/61; `tsc --noEmit` = 0; `lint` = 0 errors (40 warnings pré-existentes em specs de auth/channels/mail).

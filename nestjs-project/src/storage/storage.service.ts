@@ -3,12 +3,16 @@ import {
   CompleteMultipartUploadCommand,
   CreateMultipartUploadCommand,
   GetObjectCommand,
+  PutObjectCommand,
   S3Client,
   UploadPartCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Inject, Injectable } from '@nestjs/common';
 import type { ConfigType } from '@nestjs/config';
+import { createWriteStream } from 'node:fs';
+import type { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import storageConfig from '../config/storage.config';
 import { STORAGE_URL_TTL } from './storage.constants';
 
@@ -161,6 +165,33 @@ export class StorageService {
     return getSignedUrl(this.s3, command, {
       expiresIn: STORAGE_URL_TTL.GET_SECONDS,
     });
+  }
+
+  /**
+   * Streams a source object from the `videos` bucket down to a local file.
+   * The worker probes/extracts from the file on disk instead of buffering the
+   * whole (potentially multi-GB) video into memory.
+   */
+  async downloadToFile(key: string, destPath: string): Promise<void> {
+    const { Body } = await this.s3.send(
+      new GetObjectCommand({ Bucket: this.videosBucket, Key: key }),
+    );
+    if (!Body) {
+      throw new Error(`Storage object not found for key "${key}"`);
+    }
+    await pipeline(Body as Readable, createWriteStream(destPath));
+  }
+
+  /** Uploads a generated thumbnail (JPEG) into the `thumbnails` bucket. */
+  async putThumbnail(key: string, body: Buffer): Promise<void> {
+    await this.s3.send(
+      new PutObjectCommand({
+        Bucket: this.thumbnailsBucket,
+        Key: key,
+        Body: body,
+        ContentType: 'image/jpeg',
+      }),
+    );
   }
 
   /** Bucket that holds thumbnail objects (for callers building GET URLs). */

@@ -15,6 +15,8 @@ import { StorageModule } from '../storage/storage.module';
 import { User } from '../users/entities/user.entity';
 import { Video } from '../videos/entities/video.entity';
 import { PROCESS_VIDEO_QUEUE } from '../videos/videos.constants';
+import { VideoProcessingService } from './video-processing.service';
+import { VideoProcessor } from './video.processor';
 
 /**
  * Root module of the standalone video worker (TD-04). Boots via
@@ -69,5 +71,6 @@ import { PROCESS_VIDEO_QUEUE } from '../videos/videos.constants';
     }),
     BullModule.registerQueue({ name: PROCESS_VIDEO_QUEUE }),
   ],
+  providers: [VideoProcessingService, VideoProcessor],
 })
 export class WorkerModule {}
